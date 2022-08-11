@@ -1,0 +1,146 @@
+trigger:
+  branches:
+   include:
+     - master
+  paths:
+    exclude:
+      - azuredevops/*
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Build_And_Sign_Application
+    displayName: 'Build and Sign Application'
+    jobs:
+      - job: Build 
+        steps:
+        - checkout: self
+          displayName: Checkout code into agent
+          persistCredentials: true
+          clean: true
+        - task: Bash@3
+          displayName: Installing Dependencies
+          inputs:
+            targetType: 'inline'
+            script: 'yarn install'
+        - task: Bash@3
+          displayName: Lint Src
+          continueOnError: true
+          inputs:
+            targetType: 'inline'
+            script: 'npm run lint'
+        - task: Bash@3
+          displayName: UnitTests
+          continueOnError: true
+          inputs:
+            targetType: 'inline'
+            script: 'npm run test'
+        - task: Bash@3
+          displayName: 'Contents of the dir'
+          inputs:
+            targetType: 'inline'
+            script: 'ls'
+        - task: Gradle@3
+          displayName: 'Gradle Clean'
+          inputs:
+            gradleWrapperFile: 'android/gradlew'
+            workingDirectory: 'android/'
+            tasks: 'clean'
+            publishJUnitResults: false
+            javaHomeOption: 'JDKVersion'
+            sonarQubeRunAnalysis: false
+            spotBugsAnalysis: false
+        - task: Gradle@3
+          displayName: 'Gradle Build'
+          inputs:
+            gradleWrapperFile: 'android/gradlew'
+            workingDirectory: 'android/'
+            options: '-PversionName=$(NEW_VERSION) -PversionCode=$(Build.BuildId)'
+            tasks: 'assembleRelease'
+            publishJUnitResults: false
+            javaHomeOption: 'JDKVersion'
+            jdkVersionOption: '1.8'
+            gradleOptions: '-Xmx3072m'
+            sonarQubeRunAnalysis: false
+            spotBugsAnalysis: false
+        # - task: AndroidSigning@2
+        #   inputs:
+        #     apkFiles: '**/*.apk'
+        #     jarsign: true
+        #     jarsignerKeystoreFile: 'pathToYourKeystoreFile'
+        #     jarsignerKeystorePassword: '$(jarsignerKeystorePassword)'
+        #     jarsignerKeystoreAlias: 'yourKeystoreAlias'
+        #     jarsignerKeyPassword: '$(jarsignerKeyPassword)'
+        #     zipalign: true
+        - task: CopyFiles@2
+          inputs:
+            Contents: '**/*.apk'
+            TargetFolder: '$(build.artifactStagingDirectory)'
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Apk to artifacts'
+          inputs:
+            PathtoPublish: '$(build.artifactStagingDirectory)'
+            ArtifactName: 'android'
+            publishLocation: 'Container'
+
+  - stage: Release_Staging
+    jobs:
+      - deployment: Deploy_to_Gplay_Console
+        displayName: Deploy to Staging Env
+        environment: 'Staging-LevelUpFitness-MobileApp'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none 
+                - task: DownloadBuildArtifacts@1
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'android'
+                    itemPattern: '**/*.apk'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+                - task: Bash@3
+                  inputs:
+                    targetType: 'inline'
+                    script: 'ls'
+                    workingDirectory: '$(Build.SourcesDirectory)'
+                # - task: GooglePlayRelease@4
+                #   inputs:
+                #     serviceConnection: 'GooglePlayConnectionService'
+                #     applicationId: 'com.LevelUpFitness.LevelUpFitness'
+                #     action: 'SingleBundle'
+                #     apkFile: '**/*.apk'
+                #     track: 'internal'
+
+  - stage: Release_Production
+    displayName: 'Release Production'
+    jobs:
+      - deployment: Deploy_to_Gplay_Production
+        displayName: Deploy to Production
+        environment: 'Production-LevelUpFitness-MobileApp'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none 
+                - task: DownloadBuildArtifacts@1
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'android'
+                    itemPattern: '**/*.apk'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+                - task: Bash@3
+                  inputs:
+                    targetType: 'inline'
+                    script: 'ls'
+                    workingDirectory: '$(Build.SourcesDirectory)'
+                # - task: GooglePlayRelease@4
+                #   inputs:
+                #     serviceConnection: 'GooglePlayConnectionService'
+                #     applicationId: 'com.LevelUpFitness.LevelUpFitness'
+                #     action: 'SingleBundle'
+                #     apkFile: '**/*.apk'
+                #     track: 'Production'

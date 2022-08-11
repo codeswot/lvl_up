@@ -1,0 +1,127 @@
+trigger:
+  branches:
+    include:
+      - master
+  paths:
+    exclude:
+      - azuredevops/*
+pool:
+  vmImage: macos-latest
+
+# variables:
+#   - group: levelUpFitness
+stages:
+  - stage: Build_And_Sign_Application
+    displayName: 'Build and Sign Application'
+    jobs:
+      - job: Build 
+        steps:
+          - checkout: self
+            displayName: 'Checkout Source Code'
+            persistCredentials: true
+            clean: true
+          - script: yarn install
+            displayName: Install Dependencies
+          - task: CocoaPods@0
+            displayName: 'Install CocoaPods'
+            inputs:
+              workingDirectory: 'ios'
+          # - task: InstallAppleCertificate@2
+          #   displayName: Install Apple Certificate
+          #   inputs:
+          #     certSecureFile: 'MobileProd.p12'
+          #     certPwd: '$(AppleCertificatePassword)' # variable from the variable group
+          #     keychain: 'temp'
+          #     deleteCert: true
+          # - task: InstallAppleProvisioningProfile@1
+          #   displayName: 'Install Apple Provisioning Profile'
+          #   inputs:
+          #     provisioningProfileLocation: 'secureFiles'
+          #     provProfileSecureFile: 'LevelUpFitness.mobileprovision' # secure file from the variable group
+          #     removeProfile: true
+          - task: Xcode@5
+            displayName: 'Build IPA'
+            inputs:
+              actions: 'build'
+              configuration: 'Release'
+              sdk: 'iphoneos'
+              xcWorkspacePath: '$(Build.SourcesDirectory)/ios/LevelUpFitness.xcworkspace'
+              scheme: 'LevelUpFitness'
+              packageApp: true
+              exportPath: 'output'
+              signingOption: 'manual'
+          - task: CopyFiles@2
+            displayName: 'Copy IPA'
+            inputs:
+              contents: '**/*.ipa'
+              targetFolder: '$(build.artifactStagingDirectory)'
+              overWrite: true
+              flattenFolders: true
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish IPA to artifacts'
+            inputs:
+              PathtoPublish: '$(build.artifactStagingDirectory)'
+              ArtifactName: 'ios'
+              publishLocation: 'Container'
+
+  - stage: Release_Staging
+    displayName: Release Staging
+    jobs:
+      - deployment: Deploy_to_TestFlight_Console
+        displayName: Deploy to Staging Env
+        environment: 'Staging-IOS-LevelUpFitness-MobileApp'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none 
+                - task: DownloadBuildArtifacts@1
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'android'
+                    itemPattern: '**/*.ipa'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+                - task: Bash@3
+                  inputs:
+                    targetType: 'inline'
+                    script: 'ls'
+                    workingDirectory: '$(Build.SourcesDirectory)'
+                # - task: AppStoreRelease@1
+                #   displayName: 'Publish to the App Store TestFlight track'
+                #   inputs:
+                #     serviceEndpoint: 'My Apple App Store service connection' # This service connection must be added by you
+                #     appIdentifier: com.yourorganization.testapplication.etc
+                #     ipaPath: '$(build.artifactstagingdirectory)/**/*.ipa'
+                #     shouldSkipWaitingForProcessing: true
+                #     shouldSkipSubmission: true
+
+  - stage: Release_Production
+    displayName: Release Production
+    jobs:
+      - deployment: Deploy_to_TestFlight_Console
+        displayName: Deploy to Production Env
+        environment: 'Production-IOS-LevelUpFitness-MobileApp'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none 
+                - task: DownloadBuildArtifacts@1
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'android'
+                    itemPattern: '**/*.ipa'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+                - task: Bash@3
+                  inputs:
+                    targetType: 'inline'
+                    script: 'ls'
+                    workingDirectory: '$(Build.SourcesDirectory)'
+                # - task: AppStorePromote@1
+                #   displayName: 'Submit to the App Store for review'
+                #   inputs:
+                #     serviceEndpoint: 'My Apple App Store service connection' # This service connection must be added by you
+                #     appIdentifier: com.yourorganization.testapplication.etc
+                #     shouldAutoRelease: false
